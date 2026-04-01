@@ -29,14 +29,21 @@ const AbaProdutividade = () => {
   const [metricasPorRegional, setMetricasPorRegional] = useState({});
   const [filtroRegional, setFiltroRegional] = useState('todas');
   const [dadosPlanilha, setDadosPlanilha] = useState(null);
-  const [tecnicoDetalhes, setTecnicoDetalhes] = useState(null);
   const [filtroAcionamento, setFiltroAcionamento] = useState('todos');
   
-  // Refs para gráficos
-  let barChartInstance = null;
-  let pieChartInstance = null;
-  let tecnicosChartInstance = null;
-  let regionalChartInstance = null;
+  // Refs para os canvases
+  const metricasChartRef = useRef(null);
+  const distribuicaoChartRef = useRef(null);
+  const regionalChartRef = useRef(null);
+  const tecnicosChartRef = useRef(null);
+  
+  // Refs para as instâncias dos gráficos
+  const chartInstances = useRef({
+    metricas: null,
+    distribuicao: null,
+    regional: null,
+    tecnicos: null
+  });
   
   useEffect(() => {
     const hoje = new Date().toISOString().split('T')[0];
@@ -48,11 +55,13 @@ const AbaProdutividade = () => {
       carregarTecnicosPorData(data);
     }
     
+    // Cleanup ao desmontar o componente
     return () => {
-      if (barChartInstance) barChartInstance?.destroy();
-      if (pieChartInstance) pieChartInstance?.destroy();
-      if (tecnicosChartInstance) tecnicosChartInstance?.destroy();
-      if (regionalChartInstance) regionalChartInstance?.destroy();
+      Object.values(chartInstances.current).forEach(chart => {
+        if (chart) {
+          chart.destroy();
+        }
+      });
     };
   }, [data]);
   
@@ -184,7 +193,7 @@ const AbaProdutividade = () => {
         almoco: '1 hora',
         atingiuProdutividade: null,
         atingiuProtocolos: null,
-        status: '⏳ Aguardando configuração'
+        status: 'Aguardando configuração'
       };
     }
     
@@ -210,6 +219,19 @@ const AbaProdutividade = () => {
       atingiuProtocolos,
       status: atingiuProdutividade && atingiuProtocolos ? 'Meta Atingida' : 'Abaixo da Meta'
     };
+  };
+  
+  const destruirTodosGraficos = () => {
+    Object.keys(chartInstances.current).forEach(key => {
+      if (chartInstances.current[key]) {
+        try {
+          chartInstances.current[key].destroy();
+        } catch (e) {
+          console.warn(`Erro ao destruir gráfico ${key}:`, e);
+        }
+        chartInstances.current[key] = null;
+      }
+    });
   };
   
   const processarProdutividade = async () => {
@@ -276,7 +298,6 @@ const AbaProdutividade = () => {
         meta: metaInfo
       });
       
-      // Agregar por regional
       if (!metricasPorReg[tecnicoObj.regional]) {
         metricasPorReg[tecnicoObj.regional] = {
           planejamento: 0,
@@ -318,9 +339,10 @@ const AbaProdutividade = () => {
     setMetricasAgregadas(metricasTotal);
     setMetricasPorRegional(metricasPorReg);
     
+    // Aguardar um tick para garantir que o DOM foi atualizado
     setTimeout(() => {
       atualizarGraficos(resultados, metricasTotal, metricasPorReg);
-    }, 100);
+    }, 150);
     
     Swal.fire({
       icon: 'success',
@@ -334,116 +356,127 @@ const AbaProdutividade = () => {
   };
   
   const atualizarGraficos = (resultados, metricasTotal, metricasPorReg) => {
-    if (barChartInstance) barChartInstance.destroy();
-    if (pieChartInstance) pieChartInstance.destroy();
-    if (tecnicosChartInstance) tecnicosChartInstance.destroy();
-    if (regionalChartInstance) regionalChartInstance.destroy();
+    // Destruir todos os gráficos existentes antes de criar novos
+    destruirTodosGraficos();
     
-    const ctxBar = document.getElementById('metricasGeraisChart')?.getContext('2d');
-    if (ctxBar) {
-      barChartInstance = new Chart(ctxBar, {
-        type: 'bar',
-        data: {
-          labels: ['Planejamento', 'Execução', 'Remarcação', 'Cancelamento', 'Tratativas CS', 'Infraestrutura', 'Resolução N2'],
-          datasets: [{
-            label: 'Quantidade de Protocolos',
-            data: [
-              metricasTotal.planejamento,
-              metricasTotal.execucao,
-              metricasTotal.remarcacao,
-              metricasTotal.cancelamento,
-              metricasTotal.tratativasCS,
-              metricasTotal.infraestrutura,
-              metricasTotal.resolucaoN2
-            ],
-            backgroundColor: 'rgba(232, 70, 93, 0.8)',
-            borderColor: '#E8465D',
-            borderWidth: 2,
-            borderRadius: 8
-          }]
-        },
-        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } }
-      });
-    }
-    
-    const ctxPie = document.getElementById('distribuicaoChart')?.getContext('2d');
-    if (ctxPie) {
-      pieChartInstance = new Chart(ctxPie, {
-        type: 'doughnut',
-        data: {
-          labels: ['Planejamento', 'Execução', 'Remarcação', 'Cancelamento', 'Tratativas CS', 'Infraestrutura', 'Resolução N2'],
-          datasets: [{
-            data: [
-              metricasTotal.planejamento,
-              metricasTotal.execucao,
-              metricasTotal.remarcacao,
-              metricasTotal.cancelamento,
-              metricasTotal.tratativasCS,
-              metricasTotal.infraestrutura,
-              metricasTotal.resolucaoN2
-            ],
-            backgroundColor: ['#E8465D', '#28a745', '#ffc107', '#dc3545', '#17a2b8', '#6f42c1', '#fd7e14'],
-            borderWidth: 0,
-            cutout: '65%'
-          }]
-        },
-        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'right' } } }
-      });
-    }
-    
-    // Gráfico por Regional
-    const regionaisNomes = Object.keys(metricasPorReg);
-    const produtividadeRegional = regionaisNomes.map(reg => metricasPorReg[reg].totalProdutividade);
-    
-    const ctxRegional = document.getElementById('regionalChart')?.getContext('2d');
-    if (ctxRegional && regionaisNomes.length > 0) {
-      regionalChartInstance = new Chart(ctxRegional, {
-        type: 'bar',
-        data: {
-          labels: regionaisNomes,
-          datasets: [{
-            label: 'Produtividade por Regional',
-            data: produtividadeRegional,
-            backgroundColor: 'rgba(74, 99, 130, 0.8)',
-            borderColor: '#4a6382',
-            borderWidth: 2,
-            borderRadius: 8
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: true,
-          scales: { y: { beginAtZero: true, title: { display: true, text: 'Pontos' } } }
-        }
-      });
-    }
-    
-    const ctxTecnicos = document.getElementById('produtividadeTecnicosChart')?.getContext('2d');
-    if (ctxTecnicos && resultados.length > 0) {
-      const tecnicosNomes = resultados.map(r => r.tecnico.length > 15 ? r.tecnico.substring(0, 12) + '...' : r.tecnico);
-      const produtividades = resultados.map(r => r.produtividade);
+    // Aguardar um momento para garantir que os canvases estão limpos
+    setTimeout(() => {
+      // Gráfico de Barras - Métricas Gerais
+      if (metricasChartRef.current) {
+        const ctx = metricasChartRef.current.getContext('2d');
+        chartInstances.current.metricas = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: ['Planejamento', 'Execução', 'Remarcação', 'Cancelamento', 'Tratativas CS', 'Infraestrutura', 'Resolução N2'],
+            datasets: [{
+              label: 'Quantidade de Protocolos',
+              data: [
+                metricasTotal.planejamento,
+                metricasTotal.execucao,
+                metricasTotal.remarcacao,
+                metricasTotal.cancelamento,
+                metricasTotal.tratativasCS,
+                metricasTotal.infraestrutura,
+                metricasTotal.resolucaoN2
+              ],
+              backgroundColor: 'rgba(232, 70, 93, 0.8)',
+              borderColor: '#E8465D',
+              borderWidth: 2,
+              borderRadius: 8
+            }]
+          },
+          options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } }
+        });
+      }
       
-      tecnicosChartInstance = new Chart(ctxTecnicos, {
-        type: 'bar',
-        data: {
-          labels: tecnicosNomes,
-          datasets: [{
-            label: 'Produtividade',
-            data: produtividades,
-            backgroundColor: resultados.map(r => {
-              if (!r.tipoAcionamento) return 'rgba(108, 117, 125, 0.8)';
-              return r.meta.atingiuProdutividade ? 'rgba(40, 167, 69, 0.8)' : 'rgba(232, 70, 93, 0.8)';
-            }),
-            borderRadius: 8
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: true,
-          scales: { y: { beginAtZero: true, title: { display: true, text: 'Pontos' } } }
-        }
-      });
-    }
+      // Gráfico de Doughnut - Distribuição
+      if (distribuicaoChartRef.current) {
+        const ctx = distribuicaoChartRef.current.getContext('2d');
+        chartInstances.current.distribuicao = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Planejamento', 'Execução', 'Remarcação', 'Cancelamento', 'Tratativas CS', 'Infraestrutura', 'Resolução N2'],
+            datasets: [{
+              data: [
+                metricasTotal.planejamento,
+                metricasTotal.execucao,
+                metricasTotal.remarcacao,
+                metricasTotal.cancelamento,
+                metricasTotal.tratativasCS,
+                metricasTotal.infraestrutura,
+                metricasTotal.resolucaoN2
+              ],
+              backgroundColor: ['#E8465D', '#28a745', '#ffc107', '#dc3545', '#17a2b8', '#6f42c1', '#fd7e14'],
+              borderWidth: 0,
+              cutout: '65%'
+            }]
+          },
+          options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'right' } } }
+        });
+      }
+      
+      // Gráfico por Regional
+      const regionaisNomes = Object.keys(metricasPorReg);
+      const produtividadeRegional = regionaisNomes.map(reg => metricasPorReg[reg].totalProdutividade);
+      
+      if (regionalChartRef.current && regionaisNomes.length > 0) {
+        const ctx = regionalChartRef.current.getContext('2d');
+        chartInstances.current.regional = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: regionaisNomes,
+            datasets: [{
+              label: 'Produtividade por Regional',
+              data: produtividadeRegional,
+              backgroundColor: 'rgba(74, 99, 130, 0.8)',
+              borderColor: '#4a6382',
+              borderWidth: 2,
+              borderRadius: 8
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            scales: { y: { beginAtZero: true, title: { display: true, text: 'Pontos' } } }
+          }
+        });
+      }
+      
+      // Gráfico por Técnico
+      if (tecnicosChartRef.current && resultados.length > 0) {
+        const ctx = tecnicosChartRef.current.getContext('2d');
+        const tecnicosNomes = resultados.map(r => r.tecnico.length > 15 ? r.tecnico.substring(0, 12) + '...' : r.tecnico);
+        const produtividades = resultados.map(r => r.produtividade);
+        
+        chartInstances.current.tecnicos = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: tecnicosNomes,
+            datasets: [{
+              label: 'Produtividade',
+              data: produtividades,
+              backgroundColor: resultados.map(r => {
+                if (!r.tipoAcionamento) return 'rgba(108, 117, 125, 0.8)';
+                return r.meta.atingiuProdutividade ? 'rgba(40, 167, 69, 0.8)' : 'rgba(232, 70, 93, 0.8)';
+              }),
+              borderRadius: 8
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            scales: { y: { beginAtZero: true, title: { display: true, text: 'Pontos' } } },
+            plugins: {
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => `${ctx.raw.toFixed(2)} pontos`
+                }
+              }
+            }
+          }
+        });
+      }
+    }, 50);
   };
   
   const verDetalhesTecnico = (tecnico) => {
@@ -507,7 +540,7 @@ const AbaProdutividade = () => {
                   <tr style="border-bottom: 1px solid #e2e8f0;">
                     <th style="text-align: left; padding: 6px 0;">Serviço</th>
                     <th style="text-align: center; padding: 6px 0;">Quantidade</th>
-                  </tr>
+                   </tr>
                 </thead>
                 <tbody>
                   ${Object.entries(tecnico.mapa || {}).slice(0, 20).map(([servico, qtd]) => `
@@ -764,19 +797,19 @@ const AbaProdutividade = () => {
           <div className="charts-grid-produtividade">
             <div className="chart-card-prod">
               <div className="chart-header-prod"><i className="fas fa-chart-bar"></i><h4>Métricas por Tipo</h4></div>
-              <canvas id="metricasGeraisChart" height="280"></canvas>
+              <canvas ref={metricasChartRef} id="metricasGeraisChart" height="280"></canvas>
             </div>
             <div className="chart-card-prod">
               <div className="chart-header-prod"><i className="fas fa-chart-pie"></i><h4>Distribuição Percentual</h4></div>
-              <canvas id="distribuicaoChart" height="280"></canvas>
+              <canvas ref={distribuicaoChartRef} id="distribuicaoChart" height="280"></canvas>
             </div>
             <div className="chart-card-prod">
               <div className="chart-header-prod"><i className="fas fa-chart-bar"></i><h4>Produtividade por Regional</h4></div>
-              <canvas id="regionalChart" height="280"></canvas>
+              <canvas ref={regionalChartRef} id="regionalChart" height="280"></canvas>
             </div>
             <div className="chart-card-prod chart-full-width">
               <div className="chart-header-prod"><i className="fas fa-trophy"></i><h4>Produtividade por Técnico</h4></div>
-              <canvas id="produtividadeTecnicosChart" height="300"></canvas>
+              <canvas ref={tecnicosChartRef} id="produtividadeTecnicosChart" height="300"></canvas>
             </div>
           </div>
           
