@@ -127,7 +127,7 @@ const Login = () => {
             </form>
             
             <div className="login-footer">
-              <p>Sistema de Gestão Técnica THERON</p>
+              <p>Sistema de Gestão Técnica ONE CLICK</p>
               <p className="version">v2.2.1</p>
             </div>
           </div>
@@ -135,7 +135,7 @@ const Login = () => {
       </div>
       
       <div className="credits">
-        <p>© 2025 THERON. Todos os direitos reservados.</p>
+        <p>© 2025 ONE CLICK. Todos os direitos reservados.</p>
       </div>
     </div>
   );
