@@ -73,7 +73,7 @@ const Sidebar = ({activeTab, onTabChange}) => {
                     <i className="fas fa-sign-out-alt"></i>
                     <span>Sair</span>
                 </button>
-                <div className="sidebar-version">v3.0.0</div>
+                <div className="sidebar-version">v3.0.1</div>
             </div>
         </aside>
     );

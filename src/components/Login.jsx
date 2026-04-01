@@ -128,7 +128,7 @@ const Login = () => {
             
             <div className="login-footer">
               <p>Sistema de Gestão Técnica ONE CLICK</p>
-              <p className="version">v2.2.1</p>
+              <p className="version">v3.0.1</p>
             </div>
           </div>
         </div>
