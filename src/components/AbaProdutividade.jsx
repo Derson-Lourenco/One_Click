@@ -57,17 +57,14 @@ const AbaProdutividade = () => {
     setDataFim(hoje);
   }, []);
   
-  // Função que carrega uma única data (já funcionava)
   const carregarDadosPorData = async (dataISO) => {
     if (!dataISO) return null;
     
     try {
       const resposta = await PlanilhaProcessor.carregarDadosPorData(dataISO);
-      
       if (resposta.status === 'not_found' || !resposta.dados || resposta.dados.length === 0) {
         return null;
       }
-      
       return resposta;
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
@@ -75,7 +72,6 @@ const AbaProdutividade = () => {
     }
   };
   
-  // Função para carregar período (usa a mesma função que já funcionava)
   const carregarDadosPorPeriodo = async () => {
     if (!dataInicio || !dataFim) {
       Swal.fire({ icon: 'warning', title: 'Selecione o período', text: 'Informe a data inicial e final!' });
@@ -652,6 +648,7 @@ const AbaProdutividade = () => {
       title: `<i class="fas fa-chart-line" style="color: #E8465D; margin-right: 8px;"></i> Detalhamento - ${tecnico.tecnico}`,
       html: `
         <div style="text-align: left; max-height: 70vh; overflow-y: auto;">
+          <!-- Informações Gerais -->
           <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #E8465D;">
             <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
               <i class="fas fa-info-circle" style="color: #E8465D; margin-right: 6px;"></i> Informações Gerais
@@ -664,6 +661,7 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
+          <!-- Métricas de Desempenho -->
           <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #28a745;">
             <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
               <i class="fas fa-chart-simple" style="color: #28a745; margin-right: 6px;"></i> Métricas de Desempenho
@@ -679,6 +677,7 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
+          <!-- Detalhamento de Protocolos COMPLETO -->
           <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #17a2b8;">
             <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
               <i class="fas fa-table-list" style="color: #17a2b8; margin-right: 6px;"></i> Detalhamento de Protocolos
@@ -697,6 +696,7 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
+          <!-- Detalhamento por Tipo (Normal vs Acionamento) -->
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
             <div style="background: #f8fafc; padding: 12px; border-radius: 12px; border-left: 3px solid #4a6382;">
               <h5 style="margin: 0 0 8px 0; font-size: 12px; color: #4a6382;"><i class="fas fa-chart-line"></i> Protocolos NORMAL</h5>
@@ -726,6 +726,7 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
+          <!-- Serviços Executados -->
           <div style="background: #f8fafc; padding: 16px; border-radius: 12px; border-left: 3px solid #4a6382;">
             <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
               <i class="fas fa-wrench" style="color: #4a6382; margin-right: 6px;"></i> Serviços Executados (${Object.keys(tecnico.mapa || {}).length} tipos)
@@ -767,6 +768,7 @@ const AbaProdutividade = () => {
       title: `<i class="fas fa-map-marker-alt" style="color: #E8465D; margin-right: 8px;"></i> Detalhamento - ${regional}`,
       html: `
         <div style="text-align: left; max-height: 70vh; overflow-y: auto;">
+          <!-- Informações Gerais -->
           <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #E8465D;">
             <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
               <i class="fas fa-info-circle" style="color: #E8465D; margin-right: 6px;"></i> Informações Gerais
@@ -777,6 +779,7 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
+          <!-- Métricas de Desempenho da Regional -->
           <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #28a745;">
             <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
               <i class="fas fa-chart-simple" style="color: #28a745; margin-right: 6px;"></i> Métricas de Desempenho da Regional
@@ -788,6 +791,7 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
+          <!-- Detalhamento de Protocolos -->
           <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #17a2b8;">
             <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
               <i class="fas fa-table-list" style="color: #17a2b8; margin-right: 6px;"></i> Detalhamento de Protocolos
@@ -806,35 +810,7 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
-            <div style="background: #f8fafc; padding: 12px; border-radius: 12px; border-left: 3px solid #4a6382;">
-              <h5 style="margin: 0 0 8px 0; font-size: 12px; color: #4a6382;"><i class="fas fa-chart-line"></i> Protocolos NORMAL</h5>
-              <div><small>Planejamento:</small> <strong>${dadosRegional.normalPlanejamento || 0}</strong></div>
-              <div><small>Execução:</small> <strong>${dadosRegional.normalExecucao || 0}</strong></div>
-              <div><small>Remarcação:</small> <strong>${dadosRegional.normalRemarcacao || 0}</strong></div>
-              <div><small>Cancelamento:</small> <strong>${dadosRegional.normalCancelamento || 0}</strong></div>
-              <div><small>Tratativas CS:</small> <strong>${dadosRegional.normalTratativasCS || 0}</strong></div>
-              <div><small>Infraestrutura:</small> <strong>${dadosRegional.normalInfraestrutura || 0}</strong></div>
-              <div><small>Resolução N2:</small> <strong>${dadosRegional.normalResolucaoN2 || 0}</strong></div>
-              <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
-                <strong>Produtividade NORMAL:</strong> ${(dadosRegional.normalTotalProdutividade || 0).toFixed(2)} pts
-              </div>
-            </div>
-            <div style="background: #f8fafc; padding: 12px; border-radius: 12px; border-left: 3px solid #E8465D;">
-              <h5 style="margin: 0 0 8px 0; font-size: 12px; color: #E8465D;"><i class="fas fa-bolt"></i> Acionamento/Ação de Ativação</h5>
-              <div><small>Planejamento:</small> <strong>${dadosRegional.acionamentoPlanejamento || 0}</strong></div>
-              <div><small>Execução:</small> <strong>${dadosRegional.acionamentoExecucao || 0}</strong></div>
-              <div><small>Remarcação:</small> <strong>${dadosRegional.acionamentoRemarcacao || 0}</strong></div>
-              <div><small>Cancelamento:</small> <strong>${dadosRegional.acionamentoCancelamento || 0}</strong></div>
-              <div><small>Tratativas CS:</small> <strong>${dadosRegional.acionamentoTratativasCS || 0}</strong></div>
-              <div><small>Infraestrutura:</small> <strong>${dadosRegional.acionamentoInfraestrutura || 0}</strong></div>
-              <div><small>Resolução N2:</small> <strong>${dadosRegional.acionamentoResolucaoN2 || 0}</strong></div>
-              <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
-                <strong>Produtividade ACIONAMENTO:</strong> ${(dadosRegional.acionamentoTotalProdutividade || 0).toFixed(2)} pts
-              </div>
-            </div>
-          </div>
-          
+          <!-- Técnicos da Regional -->
           <div style="background: #f8fafc; padding: 16px; border-radius: 12px; border-left: 3px solid #4a6382;">
             <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
               <i class="fas fa-users" style="color: #4a6382; margin-right: 6px;"></i> Técnicos da Regional (${dadosRegional.tecnicosList?.length || 0})
@@ -858,14 +834,14 @@ const AbaProdutividade = () => {
                         <span style="background: ${tec.tipo ? '#E8465D20' : '#e9ecef'}; padding: 2px 8px; border-radius: 12px; font-size: 10px;">
                           ${tec.tipo || 'Não config.'}
                         </span>
-                       </tr>
+                      </td>
                       <td style="text-align: center; padding: 6px 0; font-weight: 600;">${tec.execucao}</td>
                       <td style="text-align: center; padding: 6px 0; font-weight: 600; color: ${tec.meta?.atingiuProdutividade ? '#28a745' : '#E8465D'};">${tec.produtividade.toFixed(2)}</td>
                       <td style="text-align: center; padding: 6px 0;">
                         <span style="color: ${tec.meta?.atingiuProdutividade && tec.meta?.atingiuProtocolos ? '#28a745' : '#e67e22'};">
                           ${tec.meta?.status || 'Aguardando'}
                         </span>
-                       </td>
+                      </td>
                     </tr>
                   `).join('')}
                 </tbody>
@@ -1333,6 +1309,7 @@ const AbaProdutividade = () => {
             <div className="tabela-resultados-prod">
               <div className="tabela-header">
                 <h4><i className="fas fa-table"></i> Detalhamento por Regional</h4>
+                <button onClick={exportarResultados} className="btn-exportar"><i className="fas fa-file-excel"></i> Exportar CSV</button>
               </div>
               <div className="table-responsive" style={{ maxHeight: '500px', overflowY: 'auto' }}>
                 <table className="data-table-prod" style={{ width: '100%' }}>
