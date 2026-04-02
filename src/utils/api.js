@@ -105,6 +105,8 @@ export const PlanilhaProcessor = {
         return "";
     },
 
+    
+
     processarDadosTecnicoPorRegional(dadosAPI, tecnicoNome, regionalNome, {TABELA_PESOS, SERVICOS_IGNORADOS, Utils}) {
         const dados = this.extrairDadosArray(dadosAPI);
         const idxProtocolo = 4;

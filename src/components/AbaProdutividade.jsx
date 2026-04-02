@@ -8,15 +8,16 @@ import { PlanilhaProcessor } from '../utils/api';
 import { TABELA_PESOS, SERVICOS_IGNORADOS } from '../utils/constants';
 
 const AbaProdutividade = () => {
-  const [data, setData] = useState('');
+  const [dataInicio, setDataInicio] = useState('');
+  const [dataFim, setDataFim] = useState('');
   const [regionais, setRegionais] = useState({});
   const [tecnicosPlanilha, setTecnicosPlanilha] = useState([]);
   const [tecnicosSelecionados, setTecnicosSelecionados] = useState([]);
   const [buscaTermo, setBuscaTermo] = useState('');
   const [carregando, setCarregando] = useState(false);
   const [dadosProdutividade, setDadosProdutividade] = useState([]);
+  const [dadosConsolidados, setDadosConsolidados] = useState(null);
   
-  // Estados para métricas
   const [metricasAgregadas, setMetricasAgregadas] = useState({
     planejamento: 0, execucao: 0, remarcacao: 0, cancelamento: 0,
     tratativasCS: 0, infraestrutura: 0, resolucaoN2: 0,
@@ -32,16 +33,15 @@ const AbaProdutividade = () => {
   const [metricasPorRegional, setMetricasPorRegional] = useState({});
   const [filtroRegional, setFiltroRegional] = useState('todas');
   const [dadosPlanilha, setDadosPlanilha] = useState(null);
-  const [filtroTipoTecnico, setFiltroTipoTecnico] = useState('todos'); // Filtro por tipo do técnico
+  const [filtroTipoTecnico, setFiltroTipoTecnico] = useState('todos');
   const [filtroTipoProtocolo, setFiltroTipoProtocolo] = useState('todos');
+  const [abaDetalhe, setAbaDetalhe] = useState('tecnicos');
   
-  // Refs para os canvases
   const metricasChartRef = useRef(null);
   const distribuicaoChartRef = useRef(null);
   const regionalChartRef = useRef(null);
   const tecnicosChartRef = useRef(null);
   
-  // Refs para as instâncias dos gráficos
   const chartInstances = useRef({
     metricas: null,
     distribuicao: null,
@@ -49,69 +49,109 @@ const AbaProdutividade = () => {
     tecnicos: null
   });
   
-  // Tipos de regime do técnico
   const TIPOS_TECNICO = ['12/36', 'Comercial', 'Acionamento', 'Ação de Ativação'];
   
   useEffect(() => {
     const hoje = new Date().toISOString().split('T')[0];
-    setData(hoje);
+    setDataInicio(hoje);
+    setDataFim(hoje);
   }, []);
   
-  useEffect(() => {
-    if (data) {
-      carregarTecnicosPorData(data);
-    }
+  // Função que carrega uma única data (já funcionava)
+  const carregarDadosPorData = async (dataISO) => {
+    if (!dataISO) return null;
     
-    return () => {
-      Object.values(chartInstances.current).forEach(chart => {
-        if (chart) {
-          chart.destroy();
-        }
-      });
-    };
-  }, [data]);
+    try {
+      const resposta = await PlanilhaProcessor.carregarDadosPorData(dataISO);
+      
+      if (resposta.status === 'not_found' || !resposta.dados || resposta.dados.length === 0) {
+        return null;
+      }
+      
+      return resposta;
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error);
+      return null;
+    }
+  };
   
-  const carregarTecnicosPorData = async (dataSelecionada) => {
-    if (!dataSelecionada) return;
+  // Função para carregar período (usa a mesma função que já funcionava)
+  const carregarDadosPorPeriodo = async () => {
+    if (!dataInicio || !dataFim) {
+      Swal.fire({ icon: 'warning', title: 'Selecione o período', text: 'Informe a data inicial e final!' });
+      return;
+    }
     
     setCarregando(true);
     setTecnicosSelecionados([]);
     setDadosProdutividade([]);
+    setDadosConsolidados(null);
+    setDadosPlanilha(null);
+    setRegionais({});
+    setTecnicosPlanilha([]);
+    
+    Swal.fire({
+      title: 'Carregando...',
+      text: `Carregando dados do período...`,
+      allowOutsideClick: false,
+      didOpen: () => Swal.showLoading()
+    });
     
     try {
-      const resposta = await PlanilhaProcessor.carregarDadosPorData(dataSelecionada);
+      const inicio = new Date(dataInicio);
+      const fim = new Date(dataFim);
       
-      if (resposta.status === 'not_found' || !resposta.dados || resposta.dados.length === 0) {
+      const datas = [];
+      const dataAtual = new Date(inicio);
+      
+      while (dataAtual <= fim) {
+        datas.push(dataAtual.toISOString().split('T')[0]);
+        dataAtual.setDate(dataAtual.getDate() + 1);
+      }
+      
+      let todosDados = [];
+      let todasRegionais = {};
+      let dadosCarregados = 0;
+      
+      for (const data of datas) {
+        const resposta = await carregarDadosPorData(data);
+        if (resposta && resposta.dados && resposta.dados.length > 0) {
+          todosDados = [...todosDados, ...resposta.dados];
+          dadosCarregados++;
+          
+          const regionaisAba = PlanilhaProcessor.extrairTecnicosPorRegional(resposta.dados);
+          for (const [reg, tecs] of Object.entries(regionaisAba)) {
+            if (!todasRegionais[reg]) todasRegionais[reg] = [];
+            tecs.forEach(tec => {
+              if (!todasRegionais[reg].includes(tec)) {
+                todasRegionais[reg].push(tec);
+              }
+            });
+          }
+        }
+      }
+      
+      if (todosDados.length === 0) {
         Swal.fire({
           icon: 'warning',
           title: 'Nenhum dado encontrado',
-          text: `Nenhuma aba encontrada para ${Utils.formatarDataParaAba(dataSelecionada)}`,
-          toast: true,
+          text: `Nenhum dado encontrado no período de ${dataInicio} a ${dataFim}`,
           timer: 3000
         });
-        setRegionais({});
         setCarregando(false);
         return;
       }
       
-      setDadosPlanilha(resposta.dados);
-      
-      let regionaisCarregadas = {};
-      if (resposta.regionaisMap && Object.keys(resposta.regionaisMap).length > 0) {
-        regionaisCarregadas = resposta.regionaisMap;
-      } else {
-        regionaisCarregadas = PlanilhaProcessor.extrairTecnicosPorRegional(resposta.dados);
-      }
-      
-      setRegionais(regionaisCarregadas);
+      setDadosPlanilha(todosDados);
+      setRegionais(todasRegionais);
       
       const tecnicosList = [];
-      for (let regional in regionaisCarregadas) {
-        regionaisCarregadas[regional].forEach(tec => {
+      for (let regional in todasRegionais) {
+        todasRegionais[regional].forEach(tec => {
           tecnicosList.push({ 
             nome: tec, 
             regional,
-            tipoTecnico: null // Agora é o tipo do técnico (12/36, Comercial, Acionamento, Ação de Ativação)
+            tipoTecnico: null
           });
         });
       }
@@ -120,13 +160,12 @@ const AbaProdutividade = () => {
       Swal.fire({
         icon: 'success',
         title: 'Dados carregados!',
-        text: `Aba "${Utils.formatarDataParaAba(dataSelecionada)}" carregada com sucesso`,
+        text: `${dadosCarregados} dia(s) carregados. ${tecnicosList.length} técnicos encontrados.`,
         timer: 2000,
-        showConfirmButton: false,
-        toast: true
+        showConfirmButton: false
       });
     } catch (error) {
-      console.error('Erro ao carregar técnicos:', error);
+      console.error('Erro ao carregar dados:', error);
       Swal.fire({
         icon: 'error',
         title: 'Erro',
@@ -216,7 +255,6 @@ const AbaProdutividade = () => {
       };
     }
     
-    // Metas por tipo de técnico
     const metas = {
       'Comercial': { produtividadeMin: 10, protocolosMin: 5, horario: '08:00 às 17:30' },
       '12/36': { produtividadeMin: 12, protocolosMin: 7, horario: '09:00 às 21:00' },
@@ -261,19 +299,14 @@ const AbaProdutividade = () => {
   };
   
   const processarProdutividade = async () => {
-    if (!data) {
-      Swal.fire({ icon: 'warning', title: 'Selecione uma data', text: 'Primeiro selecione a data dos dados!' });
+    if (!dadosPlanilha) {
+      Swal.fire({ icon: 'warning', title: 'Carregue os dados', text: 'Primeiro selecione o período e clique em "Carregar Dados"!' });
       return;
     }
     
     if (tecnicosSelecionados.length === 0) {
       Swal.fire({ icon: 'warning', title: 'Nenhum técnico selecionado', text: 'Selecione pelo menos um técnico da lista!' });
       return;
-    }
-    
-    if (!dadosPlanilha) {
-      await carregarTecnicosPorData(data);
-      if (!dadosPlanilha) return;
     }
     
     setCarregando(true);
@@ -286,7 +319,6 @@ const AbaProdutividade = () => {
     });
     
     const resultados = [];
-    
     const metricasTotal = {
       planejamento: 0, execucao: 0, remarcacao: 0, cancelamento: 0,
       tratativasCS: 0, infraestrutura: 0, resolucaoN2: 0,
@@ -333,9 +365,17 @@ const AbaProdutividade = () => {
           acionamentoTotalProdutividade: 0, acionamentoTotalExecutado: 0,
           normalPlanejamento: 0, normalExecucao: 0, normalRemarcacao: 0, normalCancelamento: 0,
           normalTratativasCS: 0, normalInfraestrutura: 0, normalResolucaoN2: 0,
-          normalTotalProdutividade: 0, normalTotalExecutado: 0
+          normalTotalProdutividade: 0, normalTotalExecutado: 0,
+          tecnicosList: []
         };
       }
+      
+      metricasPorReg[tecnicoObj.regional].tecnicosList.push({
+        nome: tecnicoObj.nome,
+        tipo: tecnicoObj.tipoTecnico,
+        ...metricas,
+        meta: metaInfo
+      });
       
       // Acumular totais
       metricasTotal.planejamento += metricas.planejamento;
@@ -403,6 +443,10 @@ const AbaProdutividade = () => {
     }
     
     setDadosProdutividade(resultados);
+    setDadosConsolidados({
+      tecnicos: resultados,
+      regionais: metricasPorReg
+    });
     setMetricasAgregadas(metricasTotal);
     setMetricasPorRegional(metricasPorReg);
     
@@ -466,7 +510,6 @@ const AbaProdutividade = () => {
     const metricasFiltradas = getMetricasFiltradas();
     
     setTimeout(() => {
-      // Gráfico de Barras - Métricas Gerais
       if (metricasChartRef.current) {
         const ctx = metricasChartRef.current.getContext('2d');
         chartInstances.current.metricas = new Chart(ctx, {
@@ -494,7 +537,6 @@ const AbaProdutividade = () => {
         });
       }
       
-      // Gráfico de Doughnut - Distribuição
       if (distribuicaoChartRef.current && metricasFiltradas.execucao > 0) {
         const ctx = distribuicaoChartRef.current.getContext('2d');
         const dadosDistribuicao = [
@@ -522,7 +564,6 @@ const AbaProdutividade = () => {
         });
       }
       
-      // Gráfico por Regional
       const regionaisNomes = Object.keys(metricasPorReg);
       let produtividadeRegional = [];
       
@@ -557,7 +598,6 @@ const AbaProdutividade = () => {
         });
       }
       
-      // Gráfico por Técnico
       if (tecnicosChartRef.current && resultados.length > 0) {
         const ctx = tecnicosChartRef.current.getContext('2d');
         let produtividades = [];
@@ -604,10 +644,14 @@ const AbaProdutividade = () => {
   };
   
   const verDetalhesTecnico = (tecnico) => {
+    const totalProtocolosTecnico = tecnico.planejamento + tecnico.execucao + tecnico.remarcacao + 
+                                     tecnico.cancelamento + tecnico.tratativasCS + 
+                                     tecnico.infraestrutura + tecnico.resolucaoN2;
+    
     Swal.fire({
       title: `<i class="fas fa-chart-line" style="color: #E8465D; margin-right: 8px;"></i> Detalhamento - ${tecnico.tecnico}`,
       html: `
-        <div style="text-align: left;">
+        <div style="text-align: left; max-height: 70vh; overflow-y: auto;">
           <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #E8465D;">
             <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
               <i class="fas fa-info-circle" style="color: #E8465D; margin-right: 6px;"></i> Informações Gerais
@@ -616,6 +660,7 @@ const AbaProdutividade = () => {
               <div><i class="fas fa-map-marker-alt" style="color: #64748b;"></i> <strong>Regional:</strong> ${tecnico.regional}</div>
               <div><i class="fas fa-briefcase" style="color: #64748b;"></i> <strong>Tipo:</strong> ${tecnico.tipoTecnico || 'Não configurado'}</div>
               <div><i class="fas fa-clock" style="color: #64748b;"></i> <strong>Horário:</strong> ${tecnico.meta.horario || 'Não definido'}</div>
+              <div><i class="fas fa-calendar" style="color: #64748b;"></i> <strong>Período:</strong> ${dataInicio} a ${dataFim}</div>
             </div>
           </div>
           
@@ -634,21 +679,202 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
+          <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #17a2b8;">
+            <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
+              <i class="fas fa-table-list" style="color: #17a2b8; margin-right: 6px;"></i> Detalhamento de Protocolos
+            </h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div><i class="fas fa-tasks" style="color: #E8465D;"></i> <strong>Protocolos Planejamento:</strong> ${tecnico.planejamento}</div>
+              <div><i class="fas fa-check-circle" style="color: #28a745;"></i> <strong>Protocolos Execução:</strong> ${tecnico.execucao}</div>
+              <div><i class="fas fa-exchange-alt" style="color: #ffc107;"></i> <strong>Protocolos Remarcação:</strong> ${tecnico.remarcacao}</div>
+              <div><i class="fas fa-ban" style="color: #dc3545;"></i> <strong>Protocolos Cancelamento:</strong> ${tecnico.cancelamento}</div>
+              <div><i class="fas fa-headset" style="color: #17a2b8;"></i> <strong>Protocolos Tratativas CS:</strong> ${tecnico.tratativasCS}</div>
+              <div><i class="fas fa-network-wired" style="color: #6f42c1;"></i> <strong>Protocolos Infraestrutura:</strong> ${tecnico.infraestrutura}</div>
+              <div><i class="fas fa-microchip" style="color: #fd7e14;"></i> <strong>Protocolos Resolução N2:</strong> ${tecnico.resolucaoN2}</div>
+            </div>
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+              <div><i class="fas fa-calculator" style="color: #4a6382;"></i> <strong>Total de Protocolos:</strong> ${totalProtocolosTecnico}</div>
+            </div>
+          </div>
+          
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
             <div style="background: #f8fafc; padding: 12px; border-radius: 12px; border-left: 3px solid #4a6382;">
               <h5 style="margin: 0 0 8px 0; font-size: 12px; color: #4a6382;"><i class="fas fa-chart-line"></i> Protocolos NORMAL</h5>
+              <div><small>Planejamento:</small> <strong>${tecnico.normalPlanejamento || 0}</strong></div>
               <div><small>Execução:</small> <strong>${tecnico.normalExecucao || 0}</strong></div>
-              <div><small>Produtividade:</small> <strong>${(tecnico.normalProdutividade || 0).toFixed(2)} pts</strong></div>
+              <div><small>Remarcação:</small> <strong>${tecnico.normalRemarcacao || 0}</strong></div>
+              <div><small>Cancelamento:</small> <strong>${tecnico.normalCancelamento || 0}</strong></div>
+              <div><small>Tratativas CS:</small> <strong>${tecnico.normalTratativasCS || 0}</strong></div>
+              <div><small>Infraestrutura:</small> <strong>${tecnico.normalInfraestrutura || 0}</strong></div>
+              <div><small>Resolução N2:</small> <strong>${tecnico.normalResolucaoN2 || 0}</strong></div>
+              <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
+                <strong>Produtividade NORMAL:</strong> ${(tecnico.normalProdutividade || 0).toFixed(2)} pts
+              </div>
             </div>
             <div style="background: #f8fafc; padding: 12px; border-radius: 12px; border-left: 3px solid #E8465D;">
               <h5 style="margin: 0 0 8px 0; font-size: 12px; color: #E8465D;"><i class="fas fa-bolt"></i> Acionamento/Ação de Ativação</h5>
+              <div><small>Planejamento:</small> <strong>${tecnico.acionamentoPlanejamento || 0}</strong></div>
               <div><small>Execução:</small> <strong>${tecnico.acionamentoExecucao || 0}</strong></div>
-              <div><small>Produtividade:</small> <strong>${(tecnico.acionamentoProdutividade || 0).toFixed(2)} pts</strong></div>
+              <div><small>Remarcação:</small> <strong>${tecnico.acionamentoRemarcacao || 0}</strong></div>
+              <div><small>Cancelamento:</small> <strong>${tecnico.acionamentoCancelamento || 0}</strong></div>
+              <div><small>Tratativas CS:</small> <strong>${tecnico.acionamentoTratativasCS || 0}</strong></div>
+              <div><small>Infraestrutura:</small> <strong>${tecnico.acionamentoInfraestrutura || 0}</strong></div>
+              <div><small>Resolução N2:</small> <strong>${tecnico.acionamentoResolucaoN2 || 0}</strong></div>
+              <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
+                <strong>Produtividade ACIONAMENTO:</strong> ${(tecnico.acionamentoProdutividade || 0).toFixed(2)} pts
+              </div>
+            </div>
+          </div>
+          
+          <div style="background: #f8fafc; padding: 16px; border-radius: 12px; border-left: 3px solid #4a6382;">
+            <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
+              <i class="fas fa-wrench" style="color: #4a6382; margin-right: 6px;"></i> Serviços Executados (${Object.keys(tecnico.mapa || {}).length} tipos)
+            </h4>
+            <div style="max-height: 300px; overflow-y: auto;">
+              <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; background: #f8fafc;">
+                    <th style="text-align: left; padding: 6px 0;">Serviço</th>
+                    <th style="text-align: center; padding: 6px 0;">Quantidade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${Object.entries(tecnico.mapa || {}).sort((a, b) => b[1] - a[1]).map(([servico, qtd]) => `
+                    <tr style="border-bottom: 1px solid #f1f5f9;">
+                      <td style="padding: 6px 0;">${servico}</td>
+                      <td style="text-align: center; padding: 6px 0; font-weight: 600;">${qtd}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
       `,
-      width: '700px',
+      width: '800px',
+      confirmButtonText: 'Fechar',
+      confirmButtonColor: '#E8465D',
+      showCloseButton: true
+    });
+  };
+  
+  const verDetalhesRegional = (regional, dadosRegional) => {
+    const totalProtocolosRegional = dadosRegional.planejamento + dadosRegional.execucao + dadosRegional.remarcacao + 
+                                      dadosRegional.cancelamento + dadosRegional.tratativasCS + 
+                                      dadosRegional.infraestrutura + dadosRegional.resolucaoN2;
+    
+    Swal.fire({
+      title: `<i class="fas fa-map-marker-alt" style="color: #E8465D; margin-right: 8px;"></i> Detalhamento - ${regional}`,
+      html: `
+        <div style="text-align: left; max-height: 70vh; overflow-y: auto;">
+          <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #E8465D;">
+            <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
+              <i class="fas fa-info-circle" style="color: #E8465D; margin-right: 6px;"></i> Informações Gerais
+            </h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div><i class="fas fa-users" style="color: #64748b;"></i> <strong>Total de Técnicos:</strong> ${dadosRegional.tecnicos}</div>
+              <div><i class="fas fa-calendar" style="color: #64748b;"></i> <strong>Período:</strong> ${dataInicio} a ${dataFim}</div>
+            </div>
+          </div>
+          
+          <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #28a745;">
+            <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
+              <i class="fas fa-chart-simple" style="color: #28a745; margin-right: 6px;"></i> Métricas de Desempenho da Regional
+            </h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div><i class="fas fa-check-circle" style="color: #28a745;"></i> <strong>Protocolos Executados:</strong> ${dadosRegional.execucao}</div>
+              <div><i class="fas fa-star" style="color: #ffc107;"></i> <strong>Produtividade Total:</strong> ${dadosRegional.totalProdutividade.toFixed(2)} pts</div>
+              <div><i class="fas fa-chart-line" style="color: #4a6382;"></i> <strong>Produtividade Média por Técnico:</strong> ${(dadosRegional.totalProdutividade / dadosRegional.tecnicos).toFixed(2)} pts</div>
+            </div>
+          </div>
+          
+          <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 16px; border-left: 3px solid #17a2b8;">
+            <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
+              <i class="fas fa-table-list" style="color: #17a2b8; margin-right: 6px;"></i> Detalhamento de Protocolos
+            </h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div><i class="fas fa-tasks" style="color: #E8465D;"></i> <strong>Protocolos Planejamento:</strong> ${dadosRegional.planejamento}</div>
+              <div><i class="fas fa-check-circle" style="color: #28a745;"></i> <strong>Protocolos Execução:</strong> ${dadosRegional.execucao}</div>
+              <div><i class="fas fa-exchange-alt" style="color: #ffc107;"></i> <strong>Protocolos Remarcação:</strong> ${dadosRegional.remarcacao}</div>
+              <div><i class="fas fa-ban" style="color: #dc3545;"></i> <strong>Protocolos Cancelamento:</strong> ${dadosRegional.cancelamento}</div>
+              <div><i class="fas fa-headset" style="color: #17a2b8;"></i> <strong>Protocolos Tratativas CS:</strong> ${dadosRegional.tratativasCS}</div>
+              <div><i class="fas fa-network-wired" style="color: #6f42c1;"></i> <strong>Protocolos Infraestrutura:</strong> ${dadosRegional.infraestrutura}</div>
+              <div><i class="fas fa-microchip" style="color: #fd7e14;"></i> <strong>Protocolos Resolução N2:</strong> ${dadosRegional.resolucaoN2}</div>
+            </div>
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+              <div><i class="fas fa-calculator" style="color: #4a6382;"></i> <strong>Total de Protocolos:</strong> ${totalProtocolosRegional}</div>
+            </div>
+          </div>
+          
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+            <div style="background: #f8fafc; padding: 12px; border-radius: 12px; border-left: 3px solid #4a6382;">
+              <h5 style="margin: 0 0 8px 0; font-size: 12px; color: #4a6382;"><i class="fas fa-chart-line"></i> Protocolos NORMAL</h5>
+              <div><small>Planejamento:</small> <strong>${dadosRegional.normalPlanejamento || 0}</strong></div>
+              <div><small>Execução:</small> <strong>${dadosRegional.normalExecucao || 0}</strong></div>
+              <div><small>Remarcação:</small> <strong>${dadosRegional.normalRemarcacao || 0}</strong></div>
+              <div><small>Cancelamento:</small> <strong>${dadosRegional.normalCancelamento || 0}</strong></div>
+              <div><small>Tratativas CS:</small> <strong>${dadosRegional.normalTratativasCS || 0}</strong></div>
+              <div><small>Infraestrutura:</small> <strong>${dadosRegional.normalInfraestrutura || 0}</strong></div>
+              <div><small>Resolução N2:</small> <strong>${dadosRegional.normalResolucaoN2 || 0}</strong></div>
+              <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
+                <strong>Produtividade NORMAL:</strong> ${(dadosRegional.normalTotalProdutividade || 0).toFixed(2)} pts
+              </div>
+            </div>
+            <div style="background: #f8fafc; padding: 12px; border-radius: 12px; border-left: 3px solid #E8465D;">
+              <h5 style="margin: 0 0 8px 0; font-size: 12px; color: #E8465D;"><i class="fas fa-bolt"></i> Acionamento/Ação de Ativação</h5>
+              <div><small>Planejamento:</small> <strong>${dadosRegional.acionamentoPlanejamento || 0}</strong></div>
+              <div><small>Execução:</small> <strong>${dadosRegional.acionamentoExecucao || 0}</strong></div>
+              <div><small>Remarcação:</small> <strong>${dadosRegional.acionamentoRemarcacao || 0}</strong></div>
+              <div><small>Cancelamento:</small> <strong>${dadosRegional.acionamentoCancelamento || 0}</strong></div>
+              <div><small>Tratativas CS:</small> <strong>${dadosRegional.acionamentoTratativasCS || 0}</strong></div>
+              <div><small>Infraestrutura:</small> <strong>${dadosRegional.acionamentoInfraestrutura || 0}</strong></div>
+              <div><small>Resolução N2:</small> <strong>${dadosRegional.acionamentoResolucaoN2 || 0}</strong></div>
+              <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
+                <strong>Produtividade ACIONAMENTO:</strong> ${(dadosRegional.acionamentoTotalProdutividade || 0).toFixed(2)} pts
+              </div>
+            </div>
+          </div>
+          
+          <div style="background: #f8fafc; padding: 16px; border-radius: 12px; border-left: 3px solid #4a6382;">
+            <h4 style="margin: 0 0 12px 0; color: #1e293b; font-size: 14px; font-weight: 600;">
+              <i class="fas fa-users" style="color: #4a6382; margin-right: 6px;"></i> Técnicos da Regional (${dadosRegional.tecnicosList?.length || 0})
+            </h4>
+            <div style="max-height: 300px; overflow-y: auto;">
+              <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; background: #f8fafc;">
+                    <th style="text-align: left; padding: 6px 0;">Técnico</th>
+                    <th style="text-align: center; padding: 6px 0;">Tipo</th>
+                    <th style="text-align: center; padding: 6px 0;">Execução</th>
+                    <th style="text-align: center; padding: 6px 0;">Produtividade</th>
+                    <th style="text-align: center; padding: 6px 0;">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(dadosRegional.tecnicosList || []).sort((a, b) => b.produtividade - a.produtividade).map(tec => `
+                    <tr style="border-bottom: 1px solid #f1f5f9;">
+                      <td style="padding: 6px 0;">${tec.nome}</td>
+                      <td style="text-align: center; padding: 6px 0;">
+                        <span style="background: ${tec.tipo ? '#E8465D20' : '#e9ecef'}; padding: 2px 8px; border-radius: 12px; font-size: 10px;">
+                          ${tec.tipo || 'Não config.'}
+                        </span>
+                       </tr>
+                      <td style="text-align: center; padding: 6px 0; font-weight: 600;">${tec.execucao}</td>
+                      <td style="text-align: center; padding: 6px 0; font-weight: 600; color: ${tec.meta?.atingiuProdutividade ? '#28a745' : '#E8465D'};">${tec.produtividade.toFixed(2)}</td>
+                      <td style="text-align: center; padding: 6px 0;">
+                        <span style="color: ${tec.meta?.atingiuProdutividade && tec.meta?.atingiuProtocolos ? '#28a745' : '#e67e22'};">
+                          ${tec.meta?.status || 'Aguardando'}
+                        </span>
+                       </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `,
+      width: '800px',
       confirmButtonText: 'Fechar',
       confirmButtonColor: '#E8465D',
       showCloseButton: true
@@ -656,7 +882,7 @@ const AbaProdutividade = () => {
   };
   
   const exportarResultados = () => {
-    if (dadosProdutividade.length === 0) {
+    if (!dadosProdutividade.length) {
       Swal.fire({ icon: 'warning', title: 'Nenhum dado', text: 'Processe os técnicos primeiro!', toast: true, timer: 2000 });
       return;
     }
@@ -671,7 +897,7 @@ const AbaProdutividade = () => {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `produtividade_${Utils.formatarData(data)}.csv`);
+    link.setAttribute('download', `produtividade_${dataInicio}_a_${dataFim}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -710,14 +936,27 @@ const AbaProdutividade = () => {
       <div className="card-produtividade">
         <div className="card-header-produtividade">
           <h3><i className="fas fa-chart-line"></i> Produtividade por Técnico</h3>
-          <p className="card-subtitle">Selecione os técnicos e configure o tipo (12/36, Comercial, Acionamento ou Ação de Ativação)</p>
+          <p className="card-subtitle">Selecione o período, os técnicos e configure o tipo (12/36, Comercial, Acionamento ou Ação de Ativação)</p>
         </div>
         
         <div className="filtros-row">
           <div className="filtro-group">
-            <label><i className="far fa-calendar-alt"></i> Data</label>
-            <input type="date" value={data} onChange={(e) => setData(e.target.value)} className="input-moderno" />
+            <label><i className="far fa-calendar-alt"></i> Data Inicial</label>
+            <input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="input-moderno" />
           </div>
+          <div className="filtro-group">
+            <label><i className="far fa-calendar-alt"></i> Data Final</label>
+            <input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="input-moderno" />
+          </div>
+          <div className="filtro-group">
+            <label>&nbsp;</label>
+            <button onClick={carregarDadosPorPeriodo} className="btn-processar" style={{ marginTop: 0 }}>
+              <i className="fas fa-download"></i> Carregar Dados
+            </button>
+          </div>
+        </div>
+        
+        <div className="filtros-row">
           <div className="filtro-group">
             <label><i className="fas fa-filter"></i> Filtrar por Regional</label>
             <select value={filtroRegional} onChange={(e) => setFiltroRegional(e.target.value)} className="input-moderno">
@@ -730,12 +969,15 @@ const AbaProdutividade = () => {
             <label><i className="fas fa-search"></i> Buscar Técnico</label>
             <input type="text" placeholder="Digite o nome..." value={buscaTermo} onChange={(e) => setBuscaTermo(e.target.value)} className="input-moderno" />
           </div>
+          <div className="filtro-group">
+            <label>&nbsp;</label>
+            <button onClick={selecionarTodosTecnicos} className="btn-outline-primary" style={{ width: '100%' }}>
+              <i className="fas fa-check-double"></i> Selecionar Todos
+            </button>
+          </div>
         </div>
         
         <div className="tecnicos-buttons">
-          <button onClick={selecionarTodosTecnicos} className="btn-outline-primary">
-            <i className="fas fa-check-double"></i> Selecionar Todos
-          </button>
           <button onClick={desmarcarTodosTecnicos} className="btn-outline-secondary">
             <i className="fas fa-times"></i> Desmarcar Todos
           </button>
@@ -837,28 +1079,28 @@ const AbaProdutividade = () => {
                 className="btn-outline-primary"
                 style={{ flex: 1 }}
               >
-                <i className="fas fa-clock"></i> Configurar como 12/36
+                <i className="fas fa-clock"></i> 12/36
               </button>
               <button 
                 onClick={() => configurarPadraoParaSelecionados('Comercial')} 
                 className="btn-outline-primary"
                 style={{ flex: 1 }}
               >
-                <i className="fas fa-briefcase"></i> Configurar como Comercial
+                <i className="fas fa-briefcase"></i> Comercial
               </button>
               <button 
                 onClick={() => configurarPadraoParaSelecionados('Acionamento')} 
                 className="btn-outline-secondary"
                 style={{ flex: 1 }}
               >
-                <i className="fas fa-bolt"></i> Configurar como Acionamento
+                <i className="fas fa-bolt"></i> Acionamento
               </button>
               <button 
                 onClick={() => configurarPadraoParaSelecionados('Ação de Ativação')} 
                 className="btn-outline-secondary"
                 style={{ flex: 1 }}
               >
-                <i className="fas fa-play-circle"></i> Configurar como Ação de Ativação
+                <i className="fas fa-play-circle"></i> Ação de Ativação
               </button>
             </div>
             <div className="card-footer-actions" style={{ marginTop: '0.5rem' }}>
@@ -928,6 +1170,42 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
+          {/* Abas de Detalhamento */}
+          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', borderBottom: '1px solid #e2e8f0' }}>
+            <button 
+              onClick={() => setAbaDetalhe('tecnicos')}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: 'none',
+                border: 'none',
+                borderBottom: abaDetalhe === 'tecnicos' ? '3px solid #E8465D' : '3px solid transparent',
+                color: abaDetalhe === 'tecnicos' ? '#E8465D' : '#64748b',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: 'none',
+                minWidth: 'auto'
+              }}
+            >
+              <i className="fas fa-users"></i> Detalhamento por Técnico
+            </button>
+            <button 
+              onClick={() => setAbaDetalhe('regionais')}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: 'none',
+                border: 'none',
+                borderBottom: abaDetalhe === 'regionais' ? '3px solid #E8465D' : '3px solid transparent',
+                color: abaDetalhe === 'regionais' ? '#E8465D' : '#64748b',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: 'none',
+                minWidth: 'auto'
+              }}
+            >
+              <i className="fas fa-map-marker-alt"></i> Detalhamento por Regional
+            </button>
+          </div>
+          
           <div className="summary-cards-produtividade">
             <div className="summary-card-prod">
               <div className="card-icon-prod" style={{ background: '#E8465D20' }}><i className="fas fa-tasks" style={{ color: '#E8465D' }}></i></div>
@@ -966,87 +1244,155 @@ const AbaProdutividade = () => {
             </div>
           </div>
           
-          {/* Tabela de Resultados */}
-          <div className="tabela-resultados-prod">
-            <div className="tabela-header">
-              <h4><i className="fas fa-table"></i> Detalhamento por Técnico</h4>
-              <button onClick={exportarResultados} className="btn-exportar"><i className="fas fa-file-excel"></i> Exportar CSV</button>
+          {/* Detalhamento por Técnico */}
+          {abaDetalhe === 'tecnicos' && (
+            <div className="tabela-resultados-prod">
+              <div className="tabela-header">
+                <h4><i className="fas fa-table"></i> Detalhamento por Técnico</h4>
+                <button onClick={exportarResultados} className="btn-exportar"><i className="fas fa-file-excel"></i> Exportar CSV</button>
+              </div>
+              <div className="table-responsive" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                <table className="data-table-prod" style={{ width: '100%' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10 }}>
+                    <tr>
+                      <th>Técnico</th>
+                      <th>Regional</th>
+                      <th>Tipo</th>
+                      <th>Planej.</th>
+                      <th>Exec.</th>
+                      <th>Remarc.</th>
+                      <th>Cancel.</th>
+                      <th>Produtiv.</th>
+                      <th>Exec NORMAL</th>
+                      <th>Exec ACION.</th>
+                      <th>Meta</th>
+                      <th>Status</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dadosFiltrados.map((item, idx) => {
+                      const execucaoNormal = item.normalExecucao || 0;
+                      const execucaoAcionamento = item.acionamentoExecucao || 0;
+                      let produtividadeExibida = item.produtividade;
+                      if (filtroTipoProtocolo === 'normal') produtividadeExibida = item.normalProdutividade || 0;
+                      if (filtroTipoProtocolo === 'acionamento') produtividadeExibida = item.acionamentoProdutividade || 0;
+                      
+                      return (
+                        <tr key={idx} className={item.tipoTecnico && !item.meta.atingiuProdutividade ? 'meta-abaixo' : ''}>
+                          <td><strong>{item.tecnico}</strong></td>
+                          <td>{item.regional}</td>
+                          <td>
+                            {item.tipoTecnico ? (
+                              <span className={`badge-tipo ${
+                                item.tipoTecnico === '12/36' ? 'badge-1236' : 
+                                item.tipoTecnico === 'Comercial' ? 'badge-comercial' : 
+                                item.tipoTecnico === 'Acionamento' ? 'badge-acionado' : 
+                                'badge-ativacao'
+                              }`}>{item.tipoTecnico}</span>
+                            ) : (
+                              <span className="badge-nao-config">Não config.</span>
+                            )}
+                          </td>
+                          <td>{item.planejamento}</td>
+                          <td><strong>{item.execucao}</strong></td>
+                          <td>{item.remarcacao}</td>
+                          <td>{item.cancelamento}</td>
+                          <td className="produtividade-destaque">{produtividadeExibida.toFixed(2)}</td>
+                          <td>{execucaoNormal}</td>
+                          <td>{execucaoAcionamento}</td>
+                          <td><small>{item.meta.produtividadeMin ? `${item.meta.produtividadeMin}pts / ${item.meta.protocolosMin}prot` : '-'}</small></td>
+                          <td>
+                            <span className={`status-badge ${item.tipoTecnico ? (item.meta.atingiuProdutividade && item.meta.atingiuProtocolos ? 'status-success' : 'status-warning') : 'status-pending'}`}>
+                              {item.meta.status}
+                            </span>
+                          </td>
+                          <td><button className="btn-detalhes" onClick={() => verDetalhesTecnico(item)}><i className="fas fa-eye"></i> Detalhes</button></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="total-row">
+                      <td colSpan="3"><strong>TOTAIS</strong></td>
+                      <td><strong>{metricasFiltradas.planejamento}</strong></td>
+                      <td><strong>{metricasFiltradas.execucao}</strong></td>
+                      <td><strong>{metricasFiltradas.remarcacao}</strong></td>
+                      <td><strong>{metricasFiltradas.cancelamento}</strong></td>
+                      <td className="produtividade-destaque"><strong>{metricasFiltradas.totalProdutividade.toFixed(2)}</strong></td>
+                      <td colSpan="5"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </div>
-            <div className="table-responsive">
-              <table className="data-table-prod">
-                <thead>
-                  <tr>
-                    <th>Técnico</th>
-                    <th>Regional</th>
-                    <th>Tipo</th>
-                    <th>Planej.</th>
-                    <th>Exec.</th>
-                    <th>Remarc.</th>
-                    <th>Cancel.</th>
-                    <th>Produtiv.</th>
-                    <th>Exec NORMAL</th>
-                    <th>Exec ACION.</th>
-                    <th>Meta</th>
-                    <th>Status</th>
-                    <th>Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dadosFiltrados.map((item, idx) => {
-                    const execucaoNormal = item.normalExecucao || 0;
-                    const execucaoAcionamento = item.acionamentoExecucao || 0;
-                    let produtividadeExibida = item.produtividade;
-                    if (filtroTipoProtocolo === 'normal') produtividadeExibida = item.normalProdutividade || 0;
-                    if (filtroTipoProtocolo === 'acionamento') produtividadeExibida = item.acionamentoProdutividade || 0;
-                    
-                    return (
-                      <tr key={idx} className={item.tipoTecnico && !item.meta.atingiuProdutividade ? 'meta-abaixo' : ''}>
-                        <td><strong>{item.tecnico}</strong></td>
-                        <td>{item.regional}</td>
-                        <td>
-                          {item.tipoTecnico ? (
-                            <span className={`badge-tipo ${
-                              item.tipoTecnico === '12/36' ? 'badge-1236' : 
-                              item.tipoTecnico === 'Comercial' ? 'badge-comercial' : 
-                              item.tipoTecnico === 'Acionamento' ? 'badge-acionado' : 
-                              'badge-ativacao'
-                            }`}>{item.tipoTecnico}</span>
-                          ) : (
-                            <span className="badge-nao-config">Não config.</span>
-                          )}
-                        </td>
-                        <td>{item.planejamento}</td>
-                        <td><strong>{item.execucao}</strong></td>
-                        <td>{item.remarcacao}</td>
-                        <td>{item.cancelamento}</td>
-                        <td className="produtividade-destaque">{produtividadeExibida.toFixed(2)}</td>
-                        <td>{execucaoNormal}</td>
-                        <td>{execucaoAcionamento}</td>
-                        <td><small>{item.meta.produtividadeMin ? `${item.meta.produtividadeMin}pts / ${item.meta.protocolosMin}prot` : '-'}</small></td>
-                        <td>
-                          <span className={`status-badge ${item.tipoTecnico ? (item.meta.atingiuProdutividade && item.meta.atingiuProtocolos ? 'status-success' : 'status-warning') : 'status-pending'}`}>
-                            {item.meta.status}
-                          </span>
-                        </td>
-                        <td><button className="btn-detalhes" onClick={() => verDetalhesTecnico(item)}><i className="fas fa-eye"></i> Detalhes</button></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="total-row">
-                    <td colSpan="3"><strong>TOTAIS</strong></td>
-                    <td><strong>{metricasFiltradas.planejamento}</strong></td>
-                    <td><strong>{metricasFiltradas.execucao}</strong></td>
-                    <td><strong>{metricasFiltradas.remarcacao}</strong></td>
-                    <td><strong>{metricasFiltradas.cancelamento}</strong></td>
-                    <td className="produtividade-destaque"><strong>{metricasFiltradas.totalProdutividade.toFixed(2)}</strong></td>
-                    <td colSpan="4"></td>
-                  </tr>
-                </tfoot>
-              </table>
+          )}
+          
+          {/* Detalhamento por Regional */}
+          {abaDetalhe === 'regionais' && dadosConsolidados?.regionais && (
+            <div className="tabela-resultados-prod">
+              <div className="tabela-header">
+                <h4><i className="fas fa-table"></i> Detalhamento por Regional</h4>
+              </div>
+              <div className="table-responsive" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                <table className="data-table-prod" style={{ width: '100%' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: 'white', zIndex: 10 }}>
+                    <tr>
+                      <th>Regional</th>
+                      <th>Técnicos</th>
+                      <th>Planej.</th>
+                      <th>Exec.</th>
+                      <th>Remarc.</th>
+                      <th>Cancel.</th>
+                      <th>Produtividade</th>
+                      <th>Exec NORMAL</th>
+                      <th>Exec ACION.</th>
+                      <th>Produtividade Média</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(dadosConsolidados.regionais).map(([regional, dados]) => {
+                      const produtividadeMedia = dados.totalProdutividade / dados.tecnicos;
+                      const execucaoNormal = dados.normalExecucao || 0;
+                      const execucaoAcionamento = dados.acionamentoExecucao || 0;
+                      let produtividadeExibida = dados.totalProdutividade;
+                      if (filtroTipoProtocolo === 'normal') produtividadeExibida = dados.normalTotalProdutividade || 0;
+                      if (filtroTipoProtocolo === 'acionamento') produtividadeExibida = dados.acionamentoTotalProdutividade || 0;
+                      
+                      return (
+                        <tr key={regional}>
+                          <td><strong>{regional}</strong></td>
+                          <td>{dados.tecnicos}</td>
+                          <td>{dados.planejamento}</td>
+                          <td><strong>{dados.execucao}</strong></td>
+                          <td>{dados.remarcacao}</td>
+                          <td>{dados.cancelamento}</td>
+                          <td className="produtividade-destaque">{produtividadeExibida.toFixed(2)}</td>
+                          <td>{execucaoNormal}</td>
+                          <td>{execucaoAcionamento}</td>
+                          <td>{produtividadeMedia.toFixed(2)}</td>
+                          <td><button className="btn-detalhes" onClick={() => verDetalhesRegional(regional, dados)}><i className="fas fa-eye"></i> Detalhes</button></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="total-row">
+                      <td><strong>TOTAIS</strong></td>
+                      <td><strong>{Object.keys(dadosConsolidados.regionais).length}</strong></td>
+                      <td><strong>{metricasFiltradas.planejamento}</strong></td>
+                      <td><strong>{metricasFiltradas.execucao}</strong></td>
+                      <td><strong>{metricasFiltradas.remarcacao}</strong></td>
+                      <td><strong>{metricasFiltradas.cancelamento}</strong></td>
+                      <td className="produtividade-destaque"><strong>{metricasFiltradas.totalProdutividade.toFixed(2)}</strong></td>
+                      <td colSpan="4"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
     </div>
