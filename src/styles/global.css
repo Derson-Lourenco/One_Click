@@ -2893,3 +2893,59 @@ html {
 .data-table-prod {
   min-width: 800px;
 }   
+
+/* Estilos para os botões de tipo de técnico */
+.radio-group-tipo-tecnico {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.radio-tipo {
+  display: inline-flex;
+  cursor: pointer;
+  padding: 0.3rem 0.8rem;
+  border-radius: 30px;
+  transition: all 0.2s ease;
+  background: #f1f5f9;
+}
+
+.radio-tipo input {
+  display: none;
+}
+
+.radio-tipo span {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #475569;
+}
+
+.radio-tipo.active {
+  background: #E8465D;
+}
+
+.radio-tipo.active span {
+  color: white;
+}
+
+/* Badges para os tipos */
+.badge-1236 {
+  background: #4a638220;
+  color: #4a6382;
+}
+
+.badge-comercial {
+  background: #E8465D20;
+  color: #E8465D;
+}
+
+.badge-acionado {
+  background: #28a74520;
+  color: #28a745;
+}
+
+.badge-ativacao {
+  background: #ffc10720;
+  color: #e67e22;
+}

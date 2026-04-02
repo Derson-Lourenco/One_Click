@@ -518,4 +518,249 @@ export const PlanilhaProcessor = {
 
         return justificativas;
     },
+
+    // NOVA FUNÇÃO: Processar dados do técnico separando por tipo (Normal vs Acionamento/Ação de Ativação)
+    processarDadosTecnicoComTipos(dadosAPI, tecnicoNome, regionalNome, {TABELA_PESOS, SERVICOS_IGNORADOS, Utils}) {
+        const dados = this.extrairDadosArray(dadosAPI);
+        const idxProtocolo = 4;
+        const idxServico = 6;
+        const idxFeito = 12;
+        const idxEquipe = 1;
+        const idxTecnico = 2;
+
+        // Adiciona protocolo virtual para status prioritários
+        const tiposPrioritarios = ["DSS", "BANCO DE HORAS", "DESLOCAMENTO", "RETIRADA DE TEMPO", "CHUVA"];
+
+        for (let i = 0; i < dados.length; i++) {
+            const linha = dados[i];
+            if (!linha) continue;
+            const feito = linha[idxFeito] ? linha[idxFeito].toString().toUpperCase().trim() : "";
+            const protocolo = linha[idxProtocolo] ? linha[idxProtocolo].toString().trim() : "";
+            const isPrioritario = tiposPrioritarios.some((tipo) => {
+                const tipoNorm = Utils.normalizarTexto(tipo);
+                const feitoNorm = Utils.normalizarTexto(feito);
+                return tipoNorm === feitoNorm;
+            });
+            if (isPrioritario && (protocolo === "" || protocolo === "0")) {
+                linha[idxProtocolo] = "1";
+            }
+        }
+
+        const calcularValorServico = (servico) => {
+            const s = servico.toUpperCase().replace(/\s+/g, "");
+            if (s.includes("RECORRÊNCIA")) return 1;
+            if (s.includes("REC+") && s.includes("DES.PORTA")) return 0.5;
+            if (servico.includes("DES.") || servico.includes("DESAT") || servico.includes("RECOLHER")) return 0.25;
+            if (servico.includes("+")) return 1.5;
+            if (
+                servico.includes("IPTV") ||
+                servico.includes("TV") ||
+                servico.includes("SVA") ||
+                servico.includes("BOX")
+            )
+                return 0.5;
+            return 1;
+        };
+
+        // Palavras-chave para identificar protocolos de acionamento/ativação
+        const palavrasAcionamento = ["acionamento", "ação de ativação", "ativação"];
+
+        const verificarSeAcionamento = (servico) => {
+            const servicoLower = servico.toLowerCase();
+            return palavrasAcionamento.some((palavra) => servicoLower.includes(palavra));
+        };
+
+        // Inicializar estrutura de retorno
+        const resultado = {
+            planejamento: 0,
+            execucao: 0,
+            remarcacao: 0,
+            cancelamento: 0,
+            tratativasCS: 0,
+            infraestrutura: 0,
+            resolucaoN2: 0,
+            totalExecutado: 0,
+            produtividade: 0,
+            mapa: {},
+
+            // Métricas NORMAL (sem "Acionamento" ou "Ação de Ativação")
+            normalPlanejamento: 0,
+            normalExecucao: 0,
+            normalRemarcacao: 0,
+            normalCancelamento: 0,
+            normalTratativasCS: 0,
+            normalInfraestrutura: 0,
+            normalResolucaoN2: 0,
+            normalTotalExecutado: 0,
+            normalProdutividade: 0,
+
+            // Métricas ACIONAMENTO (contém "Acionamento" ou "Ação de Ativação")
+            acionamentoPlanejamento: 0,
+            acionamentoExecucao: 0,
+            acionamentoRemarcacao: 0,
+            acionamentoCancelamento: 0,
+            acionamentoTratativasCS: 0,
+            acionamentoInfraestrutura: 0,
+            acionamentoResolucaoN2: 0,
+            acionamentoTotalExecutado: 0,
+            acionamentoProdutividade: 0,
+        };
+
+        let processandoTecnico = false;
+
+        for (let i = 0; i < dados.length; i++) {
+            const linha = dados[i];
+            if (!linha) continue;
+            const colB = (linha[idxEquipe] || "").toString().trim();
+            const colC = (linha[idxTecnico] || "").toString().trim();
+            const colProtocolo = linha[idxProtocolo] ? linha[idxProtocolo].toString().trim() : "";
+
+            // Identificar início do bloco do técnico
+            if (colB === "0" && colC === tecnicoNome) {
+                processandoTecnico = true;
+                continue;
+            }
+            // Sair do bloco quando encontrar outro técnico
+            if (processandoTecnico && colB === "0" && colC && colC !== tecnicoNome && colC.length > 3) {
+                processandoTecnico = false;
+                break;
+            }
+            if (!processandoTecnico) continue;
+
+            let protocolo = colProtocolo;
+            let servicoOriginal = linha[idxServico] ? linha[idxServico].toString().trim() : "";
+            let feito = linha[idxFeito] ? linha[idxFeito].toString().trim() : "";
+
+            protocolo = protocolo.replace(/[\x00-\x1F\x7F]/g, "");
+            servicoOriginal = servicoOriginal.replace(/[\x00-\x1F\x7F]/g, "");
+            feito = feito.replace(/[\x00-\x1F\x7F]/g, "");
+
+            const servicoNormalizado = Utils.normalizarTexto(servicoOriginal);
+            const feitoNormalizado = Utils.normalizarTexto(feito);
+
+            // Verificar se é retirada prioritária
+            const tiposRetiradaPermitidos = ["DSS", "BANCO DE HORAS", "DESLOCAMENTO", "RETIRADA DE TEMPO", "CHUVA"];
+            const isRetiradaPermitida = tiposRetiradaPermitidos.some((tipo) => {
+                const tipoNormalizado = Utils.normalizarTexto(tipo);
+                return feitoNormalizado === tipoNormalizado;
+            });
+
+            // Validar protocolo (exceto para retiradas prioritárias)
+            if (!isRetiradaPermitida) {
+                if (protocolo === "" || protocolo === "0") continue;
+                if (!/^\d+$/.test(protocolo)) continue;
+                if (protocolo === "PROTOCOLO") continue;
+            }
+
+            // Ignorar serviços específicos
+            if (SERVICOS_IGNORADOS.some((ignorado) => servicoNormalizado.includes(Utils.normalizarTexto(ignorado))))
+                continue;
+
+            // Ignorar linhas de resumo
+            const servicosResumo = ["M.E.", "MMA", "RESUMO", "TOTAL", "EQUIPE"];
+            if (servicosResumo.some((resumo) => servicoOriginal.includes(resumo))) continue;
+
+            // Ignorar linhas sem feito válido
+            if (feitoNormalizado === "NENHUM" || feito === "0" || feito === "-" || feito === "") continue;
+
+            // Determinar o tipo de protocolo (Normal vs Acionamento)
+            const isAcionamento = verificarSeAcionamento(servicoOriginal);
+
+            // Contar planejamento (total e por tipo)
+            resultado.planejamento++;
+            if (isAcionamento) {
+                resultado.acionamentoPlanejamento++;
+            } else {
+                resultado.normalPlanejamento++;
+            }
+
+            // Processar cancelamento
+            if (feitoNormalizado.includes("CANCEL")) {
+                resultado.cancelamento++;
+                if (isAcionamento) {
+                    resultado.acionamentoCancelamento++;
+                } else {
+                    resultado.normalCancelamento++;
+                }
+                continue;
+            }
+
+            // Processar remarcação
+            if (feitoNormalizado === "RV" || feitoNormalizado === "RC") {
+                resultado.remarcacao++;
+                if (isAcionamento) {
+                    resultado.acionamentoRemarcacao++;
+                } else {
+                    resultado.normalRemarcacao++;
+                }
+                continue;
+            }
+
+            // Verificar linha completa para outros tipos
+            const linhaCompleta = Utils.normalizarTexto(protocolo + " " + servicoOriginal + " " + feito);
+
+            // Tratativas CS
+            if (linhaCompleta.includes("TRATAT")) {
+                resultado.tratativasCS++;
+                if (isAcionamento) {
+                    resultado.acionamentoTratativasCS++;
+                } else {
+                    resultado.normalTratativasCS++;
+                }
+                continue;
+            }
+
+            // Infraestrutura
+            if (linhaCompleta.includes("INFRA")) {
+                resultado.infraestrutura++;
+                if (isAcionamento) {
+                    resultado.acionamentoInfraestrutura++;
+                } else {
+                    resultado.normalInfraestrutura++;
+                }
+                continue;
+            }
+
+            // Resolução N2
+            if (linhaCompleta.includes("NIVEL 2") || linhaCompleta.includes("N2")) {
+                resultado.resolucaoN2++;
+                if (isAcionamento) {
+                    resultado.acionamentoResolucaoN2++;
+                } else {
+                    resultado.normalResolucaoN2++;
+                }
+                continue;
+            }
+
+            // Execução (OK, FEITO, ENCERRAMENTO)
+            if (
+                feitoNormalizado.includes("OK") ||
+                feitoNormalizado.includes("FEITO") ||
+                feitoNormalizado.includes("ENCERRAMENTO")
+            ) {
+                // Total
+                resultado.execucao++;
+                const valor = calcularValorServico(servicoOriginal);
+                resultado.totalExecutado += valor;
+                resultado.produtividade += valor;
+
+                // Por tipo
+                if (isAcionamento) {
+                    resultado.acionamentoExecucao++;
+                    resultado.acionamentoTotalExecutado += valor;
+                    resultado.acionamentoProdutividade += valor;
+                } else {
+                    resultado.normalExecucao++;
+                    resultado.normalTotalExecutado += valor;
+                    resultado.normalProdutividade += valor;
+                }
+
+                // Mapa de serviços
+                if (!resultado.mapa[servicoOriginal]) resultado.mapa[servicoOriginal] = 0;
+                resultado.mapa[servicoOriginal] += 1;
+            }
+        }
+
+        return resultado;
+    },
 };
