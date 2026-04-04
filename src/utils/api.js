@@ -93,8 +93,6 @@ export const PlanilhaProcessor = {
         return regionais;
     },
 
-    // src/utils/api.js - Adicionar no PlanilhaProcessor
-
     extrairNotaFeito(dadosAPI, linhaIndex) {
         if (!dadosAPI || dadosAPI.length === 0) return "";
         if (Array.isArray(dadosAPI[0]) && !dadosAPI[0].hasOwnProperty("linha")) return "";
@@ -105,7 +103,23 @@ export const PlanilhaProcessor = {
         return "";
     },
 
-    
+    extrairTipoProtocolo(dadosAPI, linhaIndex) {
+        if (!dadosAPI || dadosAPI.length === 0) return null;
+        if (dadosAPI[linhaIndex] && dadosAPI[linhaIndex].preAudi !== undefined) {
+            const preAudi = dadosAPI[linhaIndex].preAudi;
+            if (preAudi) {
+                const valor = preAudi.toString().toUpperCase().trim();
+                if (valor === "AC") return "ACIONAMENTO";
+                if (valor === "AA") return "ACAO_ATIVACAO";
+            }
+        }
+        if (dadosAPI[linhaIndex] && dadosAPI[linhaIndex].linha && dadosAPI[linhaIndex].linha[17]) {
+            const preAudi = dadosAPI[linhaIndex].linha[17].toString().toUpperCase().trim();
+            if (preAudi === "AC") return "ACIONAMENTO";
+            if (preAudi === "AA") return "ACAO_ATIVACAO";
+        }
+        return null;
+    },
 
     processarDadosTecnicoPorRegional(dadosAPI, tecnicoNome, regionalNome, {TABELA_PESOS, SERVICOS_IGNORADOS, Utils}) {
         const dados = this.extrairDadosArray(dadosAPI);
@@ -115,7 +129,6 @@ export const PlanilhaProcessor = {
         const idxEquipe = 1;
         const idxTecnico = 2;
 
-        // Adiciona protocolo virtual para status prioritários
         const tiposPrioritarios = ["DSS", "BANCO DE HORAS", "DESLOCAMENTO", "RETIRADA DE TEMPO", "CHUVA"];
 
         for (let i = 0; i < dados.length; i++) {
@@ -235,6 +248,7 @@ export const PlanilhaProcessor = {
             }
             if (
                 feitoNormalizado.includes("OK") ||
+                feitoNormalizado.includes("ESCALONAMENTO") ||
                 feitoNormalizado.includes("FEITO") ||
                 feitoNormalizado.includes("ENCERRAMENTO")
             ) {
@@ -272,8 +286,6 @@ export const PlanilhaProcessor = {
             produtividade,
         };
     },
-
-    // src/utils/api.js - Substituir o método processarRetiradasDoTecnico
 
     processarRetiradasDoTecnico(dadosAPI, tecnicoNome, {Utils, TIPOS_RETIRADA}) {
         const retiradas = [];
@@ -353,7 +365,6 @@ export const PlanilhaProcessor = {
                         }
                     }
 
-                    // USAR A NOTA FEITO COMO MOTIVO
                     if (notaFeito && notaFeito.trim()) {
                         motivo = notaFeito;
                     } else {
@@ -432,7 +443,6 @@ export const PlanilhaProcessor = {
                             }
                         }
 
-                        // USAR A NOTA FEITO COMO MOTIVO
                         if (notaFeito && notaFeito.trim()) {
                             motivo = notaFeito;
                         } else {
@@ -452,8 +462,6 @@ export const PlanilhaProcessor = {
 
         return retiradas;
     },
-
-    // src/utils/api.js - Substituir o método processarJustificativasAdicionaisDoTecnico
 
     processarJustificativasAdicionaisDoTecnico(dadosAPI, tecnicoNome, {Utils, TIPOS_RETIRADA}) {
         const justificativas = [];
@@ -498,7 +506,6 @@ export const PlanilhaProcessor = {
                 const temHorarioValidoFlag = Utils.temHorarioValido(tempoExecucao);
 
                 if (isRetirada && !temHorarioValidoFlag) {
-                    // USAR A NOTA FEITO COMO JUSTIFICATIVA
                     let motivo = "";
                     if (notaFeito && notaFeito.trim()) {
                         motivo = notaFeito.trim();
@@ -521,18 +528,41 @@ export const PlanilhaProcessor = {
         return justificativas;
     },
 
-    // NOVA FUNÇÃO: Processar dados do técnico separando por tipo (Normal vs Acionamento/Ação de Ativação)
     processarDadosTecnicoComTipos(dadosAPI, tecnicoNome, regionalNome, {TABELA_PESOS, SERVICOS_IGNORADOS, Utils}) {
-        const dados = this.extrairDadosArray(dadosAPI);
+        // Garantir que dadosAPI é um array
+        if (!dadosAPI || !Array.isArray(dadosAPI)) {
+            console.error("dadosAPI não é um array:", dadosAPI);
+            return this.getEmptyResult();
+        }
+
+        // Extrair dados como array de linhas
+        let dados = [];
+        let dadosOriginais = [];
+        for (let i = 0; i < dadosAPI.length; i++) {
+            const item = dadosAPI[i];
+            if (item && item.linha && Array.isArray(item.linha)) {
+                dados.push(item.linha);
+                dadosOriginais.push(item);
+            } else if (item && Array.isArray(item)) {
+                dados.push(item);
+                dadosOriginais.push({linha: item});
+            }
+        }
+
+        if (dados.length === 0) {
+            console.error("Nenhum dado extraído para o técnico:", tecnicoNome);
+            return this.getEmptyResult();
+        }
+
         const idxProtocolo = 4;
         const idxServico = 6;
         const idxFeito = 12;
         const idxEquipe = 1;
         const idxTecnico = 2;
 
-        // Adiciona protocolo virtual para status prioritários
         const tiposPrioritarios = ["DSS", "BANCO DE HORAS", "DESLOCAMENTO", "RETIRADA DE TEMPO", "CHUVA"];
 
+        // Adiciona protocolo virtual para status prioritários
         for (let i = 0; i < dados.length; i++) {
             const linha = dados[i];
             if (!linha) continue;
@@ -564,15 +594,6 @@ export const PlanilhaProcessor = {
             return 1;
         };
 
-        // Palavras-chave para identificar protocolos de acionamento/ativação
-        const palavrasAcionamento = ["acionamento", "ação de ativação", "ativação"];
-
-        const verificarSeAcionamento = (servico) => {
-            const servicoLower = servico.toLowerCase();
-            return palavrasAcionamento.some((palavra) => servicoLower.includes(palavra));
-        };
-
-        // Inicializar estrutura de retorno
         const resultado = {
             planejamento: 0,
             execucao: 0,
@@ -584,8 +605,14 @@ export const PlanilhaProcessor = {
             totalExecutado: 0,
             produtividade: 0,
             mapa: {},
+            mapaExecucao: {},
+            mapaCancelamento: {},
+            mapaTratativasCS: {},
+            mapaInfraestrutura: {},
+            mapaResolucaoN2: {},
+            mapaRemarcacaoRC: {},
+            mapaRemarcacaoRV: {},
 
-            // Métricas NORMAL (sem "Acionamento" ou "Ação de Ativação")
             normalPlanejamento: 0,
             normalExecucao: 0,
             normalRemarcacao: 0,
@@ -596,7 +623,6 @@ export const PlanilhaProcessor = {
             normalTotalExecutado: 0,
             normalProdutividade: 0,
 
-            // Métricas ACIONAMENTO (contém "Acionamento" ou "Ação de Ativação")
             acionamentoPlanejamento: 0,
             acionamentoExecucao: 0,
             acionamentoRemarcacao: 0,
@@ -606,30 +632,44 @@ export const PlanilhaProcessor = {
             acionamentoResolucaoN2: 0,
             acionamentoTotalExecutado: 0,
             acionamentoProdutividade: 0,
+
+            ativacaoPlanejamento: 0,
+            ativacaoExecucao: 0,
+            ativacaoRemarcacao: 0,
+            ativacaoCancelamento: 0,
+            ativacaoTratativasCS: 0,
+            ativacaoInfraestrutura: 0,
+            ativacaoResolucaoN2: 0,
+            ativacaoTotalExecutado: 0,
+            ativacaoProdutividade: 0,
         };
 
         let processandoTecnico = false;
+        let totalLinhasProcessadas = 0;
 
         for (let i = 0; i < dados.length; i++) {
             const linha = dados[i];
             if (!linha) continue;
+
             const colB = (linha[idxEquipe] || "").toString().trim();
             const colC = (linha[idxTecnico] || "").toString().trim();
-            const colProtocolo = linha[idxProtocolo] ? linha[idxProtocolo].toString().trim() : "";
 
             // Identificar início do bloco do técnico
             if (colB === "0" && colC === tecnicoNome) {
                 processandoTecnico = true;
                 continue;
             }
+
             // Sair do bloco quando encontrar outro técnico
             if (processandoTecnico && colB === "0" && colC && colC !== tecnicoNome && colC.length > 3) {
                 processandoTecnico = false;
-                break;
+                // Não break, continua para ver se tem mais blocos do mesmo técnico (pode acontecer em múltiplos dias)
+                continue;
             }
+
             if (!processandoTecnico) continue;
 
-            let protocolo = colProtocolo;
+            let protocolo = linha[idxProtocolo] ? linha[idxProtocolo].toString().trim() : "";
             let servicoOriginal = linha[idxServico] ? linha[idxServico].toString().trim() : "";
             let feito = linha[idxFeito] ? linha[idxFeito].toString().trim() : "";
 
@@ -665,13 +705,36 @@ export const PlanilhaProcessor = {
             // Ignorar linhas sem feito válido
             if (feitoNormalizado === "NENHUM" || feito === "0" || feito === "-" || feito === "") continue;
 
-            // Determinar o tipo de protocolo (Normal vs Acionamento)
-            const isAcionamento = verificarSeAcionamento(servicoOriginal);
+            totalLinhasProcessadas++;
 
-            // Contar planejamento (total e por tipo)
+            // Determinar o tipo de protocolo baseado na coluna R (preAudi)
+            let tipoProtocolo = "NORMAL";
+            const itemOriginal = dadosOriginais[i];
+            if (itemOriginal && itemOriginal.preAudi) {
+                const preAudi = itemOriginal.preAudi.toString().toUpperCase().trim();
+                if (preAudi === "AC") {
+                    tipoProtocolo = "ACIONAMENTO";
+                } else if (preAudi === "AA") {
+                    tipoProtocolo = "ATIVACAO";
+                }
+            }
+
+            // Fallback: verificar por texto no serviço
+            if (tipoProtocolo === "NORMAL") {
+                const servicoLower = servicoOriginal.toLowerCase();
+                if (servicoLower.includes("acionamento")) {
+                    tipoProtocolo = "ACIONAMENTO";
+                } else if (servicoLower.includes("ação de ativação") || servicoLower.includes("ativação")) {
+                    tipoProtocolo = "ATIVACAO";
+                }
+            }
+
+            // Contar planejamento (sempre)
             resultado.planejamento++;
-            if (isAcionamento) {
+            if (tipoProtocolo === "ACIONAMENTO") {
                 resultado.acionamentoPlanejamento++;
+            } else if (tipoProtocolo === "ATIVACAO") {
+                resultado.ativacaoPlanejamento++;
             } else {
                 resultado.normalPlanejamento++;
             }
@@ -679,8 +742,13 @@ export const PlanilhaProcessor = {
             // Processar cancelamento
             if (feitoNormalizado.includes("CANCEL")) {
                 resultado.cancelamento++;
-                if (isAcionamento) {
+                if (!resultado.mapaCancelamento[servicoOriginal]) resultado.mapaCancelamento[servicoOriginal] = 0;
+                resultado.mapaCancelamento[servicoOriginal]++;
+
+                if (tipoProtocolo === "ACIONAMENTO") {
                     resultado.acionamentoCancelamento++;
+                } else if (tipoProtocolo === "ATIVACAO") {
+                    resultado.ativacaoCancelamento++;
                 } else {
                     resultado.normalCancelamento++;
                 }
@@ -690,22 +758,37 @@ export const PlanilhaProcessor = {
             // Processar remarcação
             if (feitoNormalizado === "RV" || feitoNormalizado === "RC") {
                 resultado.remarcacao++;
-                if (isAcionamento) {
+
+                if (feitoNormalizado === "RC") {
+                    if (!resultado.mapaRemarcacaoRC[servicoOriginal]) resultado.mapaRemarcacaoRC[servicoOriginal] = 0;
+                    resultado.mapaRemarcacaoRC[servicoOriginal]++;
+                } else if (feitoNormalizado === "RV") {
+                    if (!resultado.mapaRemarcacaoRV[servicoOriginal]) resultado.mapaRemarcacaoRV[servicoOriginal] = 0;
+                    resultado.mapaRemarcacaoRV[servicoOriginal]++;
+                }
+
+                if (tipoProtocolo === "ACIONAMENTO") {
                     resultado.acionamentoRemarcacao++;
+                } else if (tipoProtocolo === "ATIVACAO") {
+                    resultado.ativacaoRemarcacao++;
                 } else {
                     resultado.normalRemarcacao++;
                 }
                 continue;
             }
 
-            // Verificar linha completa para outros tipos
             const linhaCompleta = Utils.normalizarTexto(protocolo + " " + servicoOriginal + " " + feito);
 
             // Tratativas CS
             if (linhaCompleta.includes("TRATAT")) {
                 resultado.tratativasCS++;
-                if (isAcionamento) {
+                if (!resultado.mapaTratativasCS[servicoOriginal]) resultado.mapaTratativasCS[servicoOriginal] = 0;
+                resultado.mapaTratativasCS[servicoOriginal]++;
+
+                if (tipoProtocolo === "ACIONAMENTO") {
                     resultado.acionamentoTratativasCS++;
+                } else if (tipoProtocolo === "ATIVACAO") {
+                    resultado.ativacaoTratativasCS++;
                 } else {
                     resultado.normalTratativasCS++;
                 }
@@ -715,8 +798,13 @@ export const PlanilhaProcessor = {
             // Infraestrutura
             if (linhaCompleta.includes("INFRA")) {
                 resultado.infraestrutura++;
-                if (isAcionamento) {
+                if (!resultado.mapaInfraestrutura[servicoOriginal]) resultado.mapaInfraestrutura[servicoOriginal] = 0;
+                resultado.mapaInfraestrutura[servicoOriginal]++;
+
+                if (tipoProtocolo === "ACIONAMENTO") {
                     resultado.acionamentoInfraestrutura++;
+                } else if (tipoProtocolo === "ATIVACAO") {
+                    resultado.ativacaoInfraestrutura++;
                 } else {
                     resultado.normalInfraestrutura++;
                 }
@@ -726,43 +814,106 @@ export const PlanilhaProcessor = {
             // Resolução N2
             if (linhaCompleta.includes("NIVEL 2") || linhaCompleta.includes("N2")) {
                 resultado.resolucaoN2++;
-                if (isAcionamento) {
+                if (!resultado.mapaResolucaoN2[servicoOriginal]) resultado.mapaResolucaoN2[servicoOriginal] = 0;
+                resultado.mapaResolucaoN2[servicoOriginal]++;
+
+                if (tipoProtocolo === "ACIONAMENTO") {
                     resultado.acionamentoResolucaoN2++;
+                } else if (tipoProtocolo === "ATIVACAO") {
+                    resultado.ativacaoResolucaoN2++;
                 } else {
                     resultado.normalResolucaoN2++;
                 }
                 continue;
             }
 
-            // Execução (OK, FEITO, ENCERRAMENTO)
+            // Execução (OK, FEITO, ENCERRAMENTO, ESCALONAMENTO)
             if (
                 feitoNormalizado.includes("OK") ||
+                feitoNormalizado.includes("ESCALONAMENTO") ||
                 feitoNormalizado.includes("FEITO") ||
                 feitoNormalizado.includes("ENCERRAMENTO")
             ) {
-                // Total
                 resultado.execucao++;
                 const valor = calcularValorServico(servicoOriginal);
                 resultado.totalExecutado += valor;
                 resultado.produtividade += valor;
 
-                // Por tipo
-                if (isAcionamento) {
+                if (!resultado.mapaExecucao[servicoOriginal]) resultado.mapaExecucao[servicoOriginal] = 0;
+                resultado.mapaExecucao[servicoOriginal]++;
+                if (!resultado.mapa[servicoOriginal]) resultado.mapa[servicoOriginal] = 0;
+                resultado.mapa[servicoOriginal]++;
+
+                if (tipoProtocolo === "ACIONAMENTO") {
                     resultado.acionamentoExecucao++;
                     resultado.acionamentoTotalExecutado += valor;
                     resultado.acionamentoProdutividade += valor;
+                } else if (tipoProtocolo === "ATIVACAO") {
+                    resultado.ativacaoExecucao++;
+                    resultado.ativacaoTotalExecutado += valor;
+                    resultado.ativacaoProdutividade += valor;
                 } else {
                     resultado.normalExecucao++;
                     resultado.normalTotalExecutado += valor;
                     resultado.normalProdutividade += valor;
                 }
-
-                // Mapa de serviços
-                if (!resultado.mapa[servicoOriginal]) resultado.mapa[servicoOriginal] = 0;
-                resultado.mapa[servicoOriginal] += 1;
             }
         }
 
+        console.log(`Técnico ${tecnicoNome}: ${totalLinhasProcessadas} linhas processadas.`);
+        console.log(
+            `Resultado - Planejamento: ${resultado.planejamento}, Execução: ${resultado.execucao}, Remarcação: ${resultado.remarcacao}, Cancelamento: ${resultado.cancelamento}`
+        );
+
         return resultado;
+    },
+
+    getEmptyResult() {
+        return {
+            planejamento: 0,
+            execucao: 0,
+            remarcacao: 0,
+            cancelamento: 0,
+            tratativasCS: 0,
+            infraestrutura: 0,
+            resolucaoN2: 0,
+            totalExecutado: 0,
+            produtividade: 0,
+            mapa: {},
+            mapaExecucao: {},
+            mapaCancelamento: {},
+            mapaTratativasCS: {},
+            mapaInfraestrutura: {},
+            mapaResolucaoN2: {},
+            mapaRemarcacaoRC: {},
+            mapaRemarcacaoRV: {},
+            normalPlanejamento: 0,
+            normalExecucao: 0,
+            normalRemarcacao: 0,
+            normalCancelamento: 0,
+            normalTratativasCS: 0,
+            normalInfraestrutura: 0,
+            normalResolucaoN2: 0,
+            normalTotalExecutado: 0,
+            normalProdutividade: 0,
+            acionamentoPlanejamento: 0,
+            acionamentoExecucao: 0,
+            acionamentoRemarcacao: 0,
+            acionamentoCancelamento: 0,
+            acionamentoTratativasCS: 0,
+            acionamentoInfraestrutura: 0,
+            acionamentoResolucaoN2: 0,
+            acionamentoTotalExecutado: 0,
+            acionamentoProdutividade: 0,
+            ativacaoPlanejamento: 0,
+            ativacaoExecucao: 0,
+            ativacaoRemarcacao: 0,
+            ativacaoCancelamento: 0,
+            ativacaoTratativasCS: 0,
+            ativacaoInfraestrutura: 0,
+            ativacaoResolucaoN2: 0,
+            ativacaoTotalExecutado: 0,
+            ativacaoProdutividade: 0,
+        };
     },
 };
